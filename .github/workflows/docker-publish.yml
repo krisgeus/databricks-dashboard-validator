@@ -2,11 +2,13 @@ name: Docker Build Dashboard SQL Checker CI
 
 on:  # yamllint disable-line rule:truthy
   pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
     tags:
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/databricks-dashboard-sql-check
@@ -54,7 +56,12 @@ jobs:
             --entrypoint /tests/run-tests.sh \
             ${{ env.DOCKER_IMAGE }}:latest
 
+      # Only the steps below push, and neither of them runs on a pull request, so a pull
+      # request has no reason to hold registry credentials at all. Gating this also keeps
+      # the job working for a pull request from a fork, where the token is read only and
+      # the login would fail.
       - name: Log in to GitHub Docker Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
