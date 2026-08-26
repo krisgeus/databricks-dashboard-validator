@@ -1,0 +1,4 @@
+# A sqlfluff config that keeps the layout rules on, used to prove that a repository can
+# opt back into the full rule set. See sqlfluff-defaults.cfg for the shipped default.
+[sqlfluff]
+dialect = databricks

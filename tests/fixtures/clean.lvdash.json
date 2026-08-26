@@ -1,0 +1,41 @@
+{
+  "datasets": [
+    {
+      "name": "runs",
+      "displayName": "Runs",
+      "queryLines": [
+        "SELECT\n",
+        "  `pipeline_id`,\n",
+        "  COUNT(*) AS `runs`\n",
+        "FROM system.lakeflow.pipelines\n",
+        "GROUP BY `pipeline_id`\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_1",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "runs",
+                  "fields": [
+                    {"name": "count(runs)", "expression": "COUNT(`runs`)"},
+                    {"name": "pipeline_id", "expression": "`pipeline_id`"}
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

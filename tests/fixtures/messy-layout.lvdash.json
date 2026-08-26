@@ -1,0 +1,15 @@
+{
+  "datasets": [
+    {
+      "name": "messy",
+      "displayName": "Badly indented but valid",
+      "queryLines": [
+        "SELECT\n",
+        "        `pipeline_id`,\n",
+        "                COUNT(*) AS `runs`\n",
+        "FROM system.lakeflow.pipelines\n",
+        "GROUP BY `pipeline_id`\n"
+      ]
+    }
+  ]
+}

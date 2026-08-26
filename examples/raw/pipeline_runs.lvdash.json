@@ -1,0 +1,695 @@
+{
+  "datasets": [
+    {
+      "name": "pipeline_runs",
+      "displayName": "Pipeline Runs Monitoring",
+      "queryLines": [
+        "WITH pipelines_at_least_one_time_completed AS (\n",
+        "    SELECT DISTINCT p2.name\n",
+        "    FROM system.lakeflow.pipeline_update_timeline AS putl_completed\n",
+        "    INNER JOIN system.lakeflow.pipelines AS p2\n",
+        "    ON putl_completed.pipeline_id = p2.pipeline_id\n",
+        "    WHERE putl_completed.result_state = 'COMPLETED'\n",
+        "      AND putl_completed.update_type IN ('REFRESH', 'VALIDATE', 'FULL_REFRESH')\n",
+        ")\n",
+        "\n",
+        "SELECT\n",
+        "  FROM_UTC_TIMESTAMP(MIN(putl.period_start_time), 'Europe/Amsterdam') AS start_time, -- to be used in filter widget\n",
+        "  FROM_UTC_TIMESTAMP(MAX(putl.period_end_time), 'Europe/Amsterdam') AS end_time, -- to be used in filter widget\n",
+        "  date_format(FROM_UTC_TIMESTAMP(MIN(putl.period_start_time), 'Europe/Amsterdam'), 'yyyy-MM-dd HH:mm:ss') AS start_time_formatted, -- to be used in table column start_time\n",
+        "  date_format(FROM_UTC_TIMESTAMP(MAX(putl.period_end_time), 'Europe/Amsterdam'), 'yyyy-MM-dd HH:mm:ss') AS end_time_formatted, -- to be used in table column start_time\n",
+        "  ANY_VALUE(pipeline.name) AS pipeline_name,\n",
+        "  ANY_VALUE(pipeline.pipeline_type) AS pipeline_type,\n",
+        "  ANY_VALUE(putl.update_type) AS update_type,\n",
+        "  ANY_VALUE(putl.trigger_type) AS trigger_type,\n",
+        "  CASE ANY_VALUE(putl.trigger_type)\n",
+        "    WHEN 'USER_ACTION' THEN 'Manually'\n",
+        "    WHEN 'API' THEN 'By pipelines API'\n",
+        "    WHEN 'API_CALL' THEN 'By pipelines API'\n",
+        "    WHEN 'JOB_TASK' THEN COALESCE(ANY_VALUE(jtrtl.task_key), 'By job task')\n",
+        "    WHEN 'RETRY_ON_FAILURE' THEN COALESCE(ANY_VALUE(jtrtl.task_key), 'Retry on failure')\n",
+        "    WHEN 'SCHEDULED' THEN 'Scheduled'\n",
+        "    ELSE ANY_VALUE(putl.trigger_type)\n",
+        "  END AS launched_by,\n",
+        "  CASE MAX(putl.result_state)\n",
+        "    WHEN 'COMPLETED' THEN 'Succeeded'\n",
+        "    WHEN 'FAILED' THEN 'Failed'\n",
+        "    WHEN 'CANCELED' THEN 'Canceled'\n",
+        "    ELSE MAX(putl.result_state)\n",
+        "  END AS result_state,\n",
+        "  MIN(putl.run_as_user_name) AS run_as,\n",
+        "  SUM(\n",
+        "    UNIX_TIMESTAMP(putl.period_end_time) - UNIX_TIMESTAMP(putl.period_start_time)\n",
+        "  ) AS duration_seconds,\n",
+        "  CASE\n",
+        "    WHEN duration_seconds >= 3600 THEN\n",
+        "      CONCAT(\n",
+        "        FLOOR(duration_seconds / 3600), 'h ',\n",
+        "        FLOOR((duration_seconds % 3600) / 60), 'm ',\n",
+        "        duration_seconds % 60, 's'\n",
+        "      )\n",
+        "    WHEN duration_seconds >= 60 THEN\n",
+        "      CONCAT(\n",
+        "        FLOOR(duration_seconds / 60), 'm ',\n",
+        "        duration_seconds % 60, 's'\n",
+        "      )\n",
+        "    ELSE\n",
+        "      CONCAT(duration_seconds, 's')\n",
+        "  END AS duration,\n",
+        "  ANY_VALUE(putl.trigger_details.job_task.job_id) AS triggered_by_job_id,\n",
+        "  ANY_VALUE(putl.trigger_details.job_task.job_task_run_id) AS triggered_by_job_run_id,\n",
+        "  ANY_VALUE(putl.workspace_id) AS workspace_id, -- to be used in url in table column start_time\n",
+        "  ANY_VALUE(pipeline.pipeline_id) AS pipeline_id, -- to be used in url in table column start_time\n",
+        "  putl.update_id, -- to be used in url in table column start_time\n",
+        "  -- For runs with trigger_type JOB_TASK and RETRY_ON_FAILURE, retry_count is displayed.\n",
+        "  -- Jobs & Pipelines UI doesn't have a column retry_count.\n",
+        "  CASE\n",
+        "    WHEN ANY_VALUE(putl.trigger_details.job_task.job_id) IS NOT NULL\n",
+        "         AND ANY_VALUE(putl.trigger_details.job_task.job_task_run_id) IS NOT NULL THEN\n",
+        "      ROW_NUMBER() OVER (\n",
+        "        PARTITION BY\n",
+        "          ANY_VALUE(putl.trigger_details.job_task.job_id), ANY_VALUE(putl.trigger_details.job_task.job_task_run_id)\n",
+        "          ORDER BY MIN(putl.period_start_time)\n",
+        "      ) - 1\n",
+        "      ELSE 0\n",
+        "  END AS retry_count\n",
+        "FROM\n",
+        "  system.lakeflow.pipeline_update_timeline AS putl\n",
+        "LEFT JOIN system.lakeflow.pipelines AS pipeline\n",
+        "ON putl.pipeline_id = pipeline.pipeline_id\n",
+        "  AND pipeline.delete_time IS NULL\n",
+        "LEFT JOIN system.lakeflow.job_task_run_timeline AS jtrtl\n",
+        "ON putl.trigger_details.job_task.job_task_run_id = jtrtl.run_id\n",
+        "WHERE putl.update_type IN ('REFRESH', 'FULL_REFRESH')\n",
+        "  -- Jobs & Pipelines UI > Runs only shows runs from pipelines that have completed at least one successful update.\n",
+        "  -- Pipelines that have only ever failed (never had a COMPLETED run) are excluded from the Runs list entirely.\n",
+        "  -- Once a pipeline succeeds at least once, all its runs (including earlier failures) become visible retroactively.\n",
+        "  AND pipeline.name IN (\n",
+        "    -- Name based, as multiple pipelines may have same name but different id's.\n",
+        "    -- If only one pipeline with same name ever completed, runs of all pipelines with that name appear in the results.\n",
+        "    -- Example: '[pr 3588 mi_devopssvc_kbdpl_dev_weu] pipeline: upk bronze-2-silver (dev)'\n",
+        "    SELECT name\n",
+        "    FROM pipelines_at_least_one_time_completed\n",
+        "\n",
+        "    -- SELECT p2.name\n",
+        "    -- FROM system.lakeflow.pipeline_update_timeline AS putl_completed_2\n",
+        "    -- INNER JOIN system.lakeflow.pipelines AS p2\n",
+        "    -- ON putl_completed_2.pipeline_id = p2.pipeline_id\n",
+        "    -- WHERE putl_completed_2.result_state = 'COMPLETED'\n",
+        "    --   AND putl_completed_2.update_type IN ('REFRESH', 'VALIDATE', 'FULL_REFRESH')\n",
+        ")\n",
+        "  -- AND (pipeline.settings.development IS NULL OR pipeline.settings.development = false)\n",
+        "  -- AND putl.trigger_type <> 'RETRY_ON_FAILURE' -- consider adding this filter\n",
+        "GROUP BY\n",
+        "  putl.update_id\n",
+        "ORDER BY\n",
+        "  start_time DESC;\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "c49179ce",
+      "displayName": "Pipeline runs",
+      "layout": [
+        {
+          "widget": {
+            "name": "total_runs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "count(update_id)",
+                      "expression": "COUNT(`update_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Total Runs",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(update_id)",
+                  "rowNumber": 0,
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    },
+                    "hideGroupSeparator": false
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "runs_by_result",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    },
+                    {
+                      "name": "count(update_id)",
+                      "expression": "COUNT(`update_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Runs by Result State",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "result_state",
+                  "displayName": "result_state",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(update_id)",
+                  "displayName": "update_id",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "displayName": "result_state",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Failed",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 9,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "runs_over_time",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    },
+                    {
+                      "name": "daily(start_time)",
+                      "expression": "DATE_TRUNC(\"DAY\", `start_time`)"
+                    },
+                    {
+                      "name": "count(update_id)",
+                      "expression": "COUNT(`update_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Runs Over Time",
+                "showTitle": true
+              },
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(start_time)",
+                  "displayName": "Day",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(update_id)",
+                  "displayName": "Runs",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "displayName": "Result",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Failed",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Canceled",
+                        "color": "#2272B4"
+                      },
+                      {
+                        "value": "Succeeded",
+                        "color": "#00A972"
+                      },
+                      {
+                        "value": "Skipped",
+                        "color": "#6B778C"
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "runs_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "start_time_formatted",
+                      "expression": "`start_time_formatted`"
+                    },
+                    {
+                      "name": "pipeline_name",
+                      "expression": "`pipeline_name`"
+                    },
+                    {
+                      "name": "pipeline_type",
+                      "expression": "`pipeline_type`"
+                    },
+                    {
+                      "name": "launched_by",
+                      "expression": "`launched_by`"
+                    },
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    },
+                    {
+                      "name": "run_as",
+                      "expression": "`run_as`"
+                    },
+                    {
+                      "name": "duration_seconds",
+                      "expression": "`duration_seconds`"
+                    },
+                    {
+                      "name": "duration",
+                      "expression": "`duration`"
+                    },
+                    {
+                      "name": "retry_count",
+                      "expression": "`retry_count`"
+                    },
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "pipeline_id",
+                      "expression": "`pipeline_id`"
+                    },
+                    {
+                      "name": "update_id",
+                      "expression": "`update_id`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`start_time_formatted`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline Runs"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "start_time_formatted",
+                    "displayName": "Start time",
+                    "actions": {
+                      "click": {
+                        "type": "link",
+                        "urlTemplate": "https://adb-{{ workspace_id }}.10.azuredatabricks.net/pipelines/{{ pipeline_id }}/updates/{{ update_id }}?o=7405615076723990",
+                        "openInNewTab": true
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "pipeline_name",
+                    "displayName": "Pipeline name"
+                  },
+                  {
+                    "fieldName": "pipeline_type",
+                    "displayName": "Pipeline type"
+                  },
+                  {
+                    "fieldName": "launched_by",
+                    "displayName": "Launched by"
+                  },
+                  {
+                    "fieldName": "result_state",
+                    "displayName": "Result state"
+                  },
+                  {
+                    "fieldName": "run_as",
+                    "displayName": "Run as"
+                  },
+                  {
+                    "fieldName": "duration_seconds",
+                    "displayName": "Duration (seconds)"
+                  },
+                  {
+                    "fieldName": "duration",
+                    "displayName": "Duration"
+                  },
+                  {
+                    "fieldName": "retry_count",
+                    "displayName": "Retry count"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 0
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_pipeline",
+            "queries": [
+              {
+                "name": "dashboards/01f19fbd71be1adf8597fff4473cc44c/datasets/01f19fbd71bf10d19e3bfc6e271f6d73_pipeline_name",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "pipeline_name",
+                      "expression": "`pipeline_name`"
+                    },
+                    {
+                      "name": "pipeline_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Pipeline name",
+                "showTitle": true
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "pipeline_name",
+                    "queryName": "dashboards/01f19fbd71be1adf8597fff4473cc44c/datasets/01f19fbd71bf10d19e3bfc6e271f6d73_pipeline_name"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_result",
+            "queries": [
+              {
+                "name": "dashboards/01f19fbd71be1adf8597fff4473cc44c/datasets/01f19fbd71bf10d19e3bfc6e271a5d44_result_state",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    },
+                    {
+                      "name": "result_state_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Result state",
+                "showTitle": true
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "result_state",
+                    "queryName": "dashboards/01f19fbd71be1adf8597fff4473cc44c/datasets/01f19fbd71bf10d19e3bfc6e271a5d44_result_state"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_launched",
+            "queries": [
+              {
+                "name": "dashboards/01f1a05a0633168d8127ca161e06bb43/datasets/01f1a05a06341044a69cc3e74a07f456_launched_by",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "launched_by",
+                      "expression": "`launched_by`"
+                    },
+                    {
+                      "name": "launched_by_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Launched by"
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "launched_by",
+                    "queryName": "dashboards/01f1a05a0633168d8127ca161e06bb43/datasets/01f1a05a06341044a69cc3e74a07f456_launched_by"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "26e790f2",
+            "queries": [
+              {
+                "name": "dashboards/01f195838e3a1fc29a4c71d606512345/datasets/01f1958403c11e13a6afcc45d854ebffg_start_time",
+                "query": {
+                  "datasetName": "pipeline_runs",
+                  "fields": [
+                    {
+                      "name": "start_time",
+                      "expression": "`start_time`"
+                    },
+                    {
+                      "name": "start_time_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "start_time",
+                    "queryName": "dashboards/01f195838e3a1fc29a4c71d606512345/datasets/01f1958403c11e13a6afcc45d854ebffg_start_time"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "db7c7a99",
+      "displayName": "Global Filters",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "76a8be42",
+      "displayName": "README",
+      "layout": [
+        {
+          "widget": {
+            "name": "78eb3425",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Dit custom dashboard toont pipeline runs inclusief runs verder dan 60 dagen terug. Dat is meer dan het standaard Databricks dashboard Jobs & Pipelines > Runs dat niet verder terug gaat dan 60 dagen.<br>Het duurt enige tijd tot een pipeline run zichtbaar wordt in het dashboard, 3 tot 25 minuten geconstateerd. Dit komt doordat Databricks de gebruikte systeem tabellen in schema system.lakeview asynchroon in een achtergrondproces bijwerkt.<br>De tabel bevat in de kolom 'Start time' links naar het Databricks dashboard van een run, maar die links werken alleen als hoogstens 60 dagen terug."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

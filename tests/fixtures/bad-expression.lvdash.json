@@ -1,0 +1,22 @@
+{
+  "pages": [
+    {
+      "name": "page_1",
+      "layout": [
+        {
+          "widget": {
+            "name": "counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [{"name": "oops", "expression": "COUNT(`runs`"}]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

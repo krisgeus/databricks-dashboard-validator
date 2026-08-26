@@ -1,0 +1,12 @@
+{
+  "pages": [
+    {
+      "name": "page_1",
+      "displayName": "Text only",
+      "layout": [
+        {"widget": {"name": "note", "textbox_spec": "# Just markdown, no SQL"}}
+      ]
+    }
+  ],
+  "uiSettings": {"theme": {"widgetHeaderAlignment": "LEFT"}}
+}

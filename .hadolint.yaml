@@ -1,0 +1,3 @@
+ignored:
+  # Pinning the debian package version of jq breaks the build on every security update.
+  - DL3008

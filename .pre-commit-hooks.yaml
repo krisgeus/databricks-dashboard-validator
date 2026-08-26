@@ -1,0 +1,21 @@
+- id: validate-dashboard-sql
+  name: Validate SQL in Databricks dashboards
+  description: Extracts the inline SQL from Lakeview dashboards and lints it with sqlfluff.
+  entry: /bin/validate-dashboard-sql
+  language: docker
+  types: [json]
+  files: \.lvdash\.json$
+- id: validate-dashboard-sql-docker-latest
+  name: Validate SQL in Databricks dashboards with latest docker
+  description: Extracts the inline SQL from Lakeview dashboards and lints it with sqlfluff.
+  language: docker_image
+  entry: --entrypoint /bin/validate-dashboard-sql ghcr.io/krisgeus/databricks-dashboard-sql-check:latest
+  types: [json]
+  files: \.lvdash\.json$
+- id: validate-dashboard-sql-docker-release
+  name: Validate SQL in Databricks dashboards with released docker
+  description: Extracts the inline SQL from Lakeview dashboards and lints it with sqlfluff.
+  language: docker_image
+  entry: --entrypoint /bin/validate-dashboard-sql ghcr.io/krisgeus/databricks-dashboard-sql-check:v1.0.0
+  types: [json]
+  files: \.lvdash\.json$

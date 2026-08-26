@@ -1,0 +1,5 @@
+{
+  "datasets": [
+    {"name": "legacy", "query": "SELECT 1 AS `one`"}
+  ]
+}

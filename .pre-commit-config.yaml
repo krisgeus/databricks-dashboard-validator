@@ -1,0 +1,54 @@
+default_stages: [pre-commit]
+
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.6.0
+  hooks:
+  - id: trailing-whitespace
+  - id: end-of-file-fixer
+  - id: check-yaml
+  - id: check-json
+    # This fixture is broken on purpose, to prove the validator rejects it.
+    exclude: ^tests/fixtures/invalid-json\.lvdash\.json$
+  - id: check-added-large-files
+  - id: detect-private-key
+  - id: check-merge-conflict
+  - id: check-executables-have-shebangs
+
+- repo: https://github.com/adrienverge/yamllint.git
+  rev: v1.35.1
+  hooks:
+  - id: yamllint
+    args: [--strict]
+
+- repo: https://github.com/igorshubovych/markdownlint-cli
+  rev: v0.41.0
+  hooks:
+  - id: markdownlint
+
+- repo: https://github.com/hadolint/hadolint
+  rev: v2.12.0
+  hooks:
+  - id: hadolint-docker
+
+- repo: https://github.com/koalaman/shellcheck-precommit
+  rev: v0.10.0
+  hooks:
+  - id: shellcheck
+
+# Dogfooding: check the example dashboards with the hook this repository ships.
+#
+# Only examples/cleaned/ is checked. examples/raw/ holds the dashboards exactly as the
+# Databricks UI exported them, violations and all, so that examples/README.md has
+# something to document the cleanup against; running the hook over them would fail every
+# commit by design. tests/fixtures/ is likewise broken on purpose.
+- repo: local
+  hooks:
+  - id: validate-dashboard-sql
+    name: Validate SQL in Databricks dashboards
+    language: script
+    entry: validate-dashboard-sql.sh
+    types: [json]
+    files: ^examples/cleaned/.*\.lvdash\.json$
+#    args:
+#      - --verbose

@@ -1,0 +1,1369 @@
+{
+  "datasets": [
+    {
+      "name": "4e67be8b",
+      "displayName": "dept_avg_grades",
+      "queryLines": [
+        "SELECT \n",
+        "  s.department, \n",
+        "  ROUND(AVG(g.score), 1) AS avg_score, \n",
+        "  COUNT(DISTINCT s.student_id) AS student_count \n",
+        "FROM grades g \n",
+        "JOIN students s USING (student_id) \n",
+        "GROUP BY s.department \n",
+        "ORDER BY avg_score DESC; "
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    },
+    {
+      "name": "65a632a6",
+      "displayName": "course_performance",
+      "queryLines": [
+        "SELECT \n",
+        "\n",
+        "  c.course_name, \n",
+        "\n",
+        "  c.department, \n",
+        "\n",
+        "  c.credits, \n",
+        "\n",
+        "  ROUND(AVG(g.score), 1) AS avg_score, \n",
+        "\n",
+        "  MIN(g.score) AS min_score, \n",
+        "\n",
+        "  MAX(g.score) AS max_score, \n",
+        "\n",
+        "  COUNT(*) AS total_enrollments \n",
+        "\n",
+        "FROM grades g \n",
+        "\n",
+        "JOIN courses c USING (course_id) \n",
+        "\n",
+        "GROUP BY c.course_name, c.department, c.credits \n",
+        "\n",
+        "ORDER BY avg_score DESC;"
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    },
+    {
+      "name": "bc724b90",
+      "displayName": "student_grades",
+      "queryLines": [
+        "SELECT \n",
+        "\n",
+        "  s.student_name, \n",
+        "\n",
+        "  s.department, \n",
+        "\n",
+        "  s.enrollment_year, \n",
+        "\n",
+        "  c.course_name, \n",
+        "\n",
+        "  c.credits, \n",
+        "\n",
+        "  g.score, \n",
+        "\n",
+        "  CASE \n",
+        "\n",
+        "    WHEN g.score >= 90 THEN 'A' \n",
+        "\n",
+        "    WHEN g.score >= 80 THEN 'B' \n",
+        "\n",
+        "    WHEN g.score >= 70 THEN 'C' \n",
+        "\n",
+        "    WHEN g.score >= 60 THEN 'D' \n",
+        "\n",
+        "    ELSE 'F' \n",
+        "\n",
+        "  END AS grade_letter \n",
+        "\n",
+        "FROM grades g \n",
+        "\n",
+        "JOIN students s USING (student_id) \n",
+        "\n",
+        "JOIN courses c USING (course_id); "
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    },
+    {
+      "name": "6ecbd922",
+      "displayName": "enrollment_semester",
+      "queryLines": [
+        "SELECT \n",
+        "\n",
+        "  semester, \n",
+        "\n",
+        "  s.department, \n",
+        "\n",
+        "  COUNT(*) AS enrollment_count \n",
+        "\n",
+        "FROM enrollments e \n",
+        "\n",
+        "JOIN students s USING (student_id) \n",
+        "\n",
+        "GROUP BY semester, s.department \n",
+        "\n",
+        "ORDER BY semester; "
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    },
+    {
+      "name": "da022da1",
+      "displayName": "dept_grade_heatmap",
+      "queryLines": [
+        "SELECT \n",
+        "\n",
+        "  s.department, \n",
+        "\n",
+        "  CASE \n",
+        "\n",
+        "    WHEN g.score >= 90 THEN 'A' \n",
+        "\n",
+        "    WHEN g.score >= 80 THEN 'B' \n",
+        "\n",
+        "    WHEN g.score >= 70 THEN 'C' \n",
+        "\n",
+        "    WHEN g.score >= 60 THEN 'D' \n",
+        "\n",
+        "    ELSE 'F' \n",
+        "\n",
+        "  END AS grade_letter, \n",
+        "\n",
+        "  COUNT(*) AS student_count \n",
+        "\n",
+        "FROM grades g \n",
+        "\n",
+        "JOIN students s USING (student_id) \n",
+        "\n",
+        "GROUP BY s.department, grade_letter \n",
+        "\n",
+        "ORDER BY s.department, grade_letter; "
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    },
+    {
+      "name": "46a9e615",
+      "displayName": "overall_metrics",
+      "queryLines": [
+        "SELECT \n",
+        "\n",
+        "  COUNT(DISTINCT student_id) AS total_students, \n",
+        "\n",
+        "  COUNT(DISTINCT course_id)  AS total_courses, \n",
+        "\n",
+        "  ROUND(AVG(score), 1)       AS overall_avg_score \n",
+        "\n",
+        "FROM grades; "
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    },
+    {
+      "name": "enrollment_forecast",
+      "displayName": "enrollment_forecast",
+      "queryLines": [
+        "WITH historical AS (\n",
+        "  SELECT\n",
+        "    semester,\n",
+        "    SUM(enrollment_count) AS total_enrollment\n",
+        "  FROM\n",
+        "    (\n",
+        "      SELECT\n",
+        "        semester,\n",
+        "        COUNT(*) AS enrollment_count\n",
+        "      FROM\n",
+        "        enrollments e JOIN students s USING (student_id)\n",
+        "      GROUP BY\n",
+        "        semester\n",
+        "    )\n",
+        "  GROUP BY\n",
+        "    semester\n",
+        "),\n",
+        "dated AS (\n",
+        "  SELECT\n",
+        "    semester,\n",
+        "    DATE_ADD(\n",
+        "      DATE '2020-01-01',\n",
+        "      CAST((ROW_NUMBER() OVER (ORDER BY semester) - 1) * 180 AS INT)\n",
+        "    ) AS ds,\n",
+        "    CAST(total_enrollment AS DOUBLE) AS total_enrollment\n",
+        "  FROM\n",
+        "    historical\n",
+        "),\n",
+        "forecasted AS (\n",
+        "  SELECT\n",
+        "    *\n",
+        "  FROM\n",
+        "    ai_forecast(\n",
+        "      TABLE(dated),\n",
+        "      horizon =>\n",
+        "        (\n",
+        "          SELECT\n",
+        "            DATE_ADD(MAX(ds), 720)\n",
+        "          FROM\n",
+        "            dated\n",
+        "        ),\n",
+        "      time_col => 'ds',\n",
+        "      value_col => 'total_enrollment',\n",
+        "      prediction_interval_width => 0.95,\n",
+        "      version => '1'\n",
+        "    )\n",
+        "),\n",
+        "combined AS (\n",
+        "  SELECT\n",
+        "    d.semester,\n",
+        "    d.ds,\n",
+        "    d.total_enrollment AS original,\n",
+        "    CAST(NULL AS DOUBLE) AS prediction,\n",
+        "    CAST(NULL AS DOUBLE) AS prediction_upper,\n",
+        "    CAST(NULL AS DOUBLE) AS prediction_lower\n",
+        "  FROM\n",
+        "    dated d\n",
+        "  UNION ALL\n",
+        "  SELECT\n",
+        "    d.semester,\n",
+        "    d.ds,\n",
+        "    CAST(NULL AS DOUBLE),\n",
+        "    d.total_enrollment,\n",
+        "    d.total_enrollment,\n",
+        "    d.total_enrollment\n",
+        "  FROM\n",
+        "    dated d\n",
+        "  WHERE\n",
+        "    d.ds\n",
+        "      = (\n",
+        "        SELECT\n",
+        "          MAX(ds)\n",
+        "        FROM\n",
+        "          dated\n",
+        "      )\n",
+        "  UNION ALL\n",
+        "  SELECT\n",
+        "    CONCAT('Forecast-', CAST(ROW_NUMBER() OVER (ORDER BY f.ds) AS STRING)) AS semester,\n",
+        "    f.ds,\n",
+        "    CAST(NULL AS DOUBLE),\n",
+        "    f.total_enrollment_forecast,\n",
+        "    f.total_enrollment_upper,\n",
+        "    f.total_enrollment_lower\n",
+        "  FROM\n",
+        "    forecasted f\n",
+        "  WHERE\n",
+        "    f.ds\n",
+        "      > (\n",
+        "        SELECT\n",
+        "          MAX(ds)\n",
+        "        FROM\n",
+        "          dated\n",
+        "      )\n",
+        ")\n",
+        "SELECT\n",
+        "  semester,\n",
+        "  ds,\n",
+        "  original,\n",
+        "  prediction,\n",
+        "  prediction_upper,\n",
+        "  prediction_lower\n",
+        "FROM\n",
+        "  combined\n",
+        "ORDER BY\n",
+        "  ds"
+      ],
+      "catalog": "dev",
+      "schema": "bronze"
+    }
+  ],
+  "pages": [
+    {
+      "name": "c8574f58",
+      "displayName": "Student Grades",
+      "layout": [
+        {
+          "widget": {
+            "name": "average-score-by-department",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "4e67be8b",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "sum(avg_score)",
+                      "expression": "SUM(`avg_score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Average score by department"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "department",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(avg_score)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "department",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "enrollment-trend-by-semester",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "enrollment_forecast",
+                  "fields": [
+                    {
+                      "name": "ds",
+                      "expression": "`ds`"
+                    },
+                    {
+                      "name": "original",
+                      "expression": "`original`"
+                    },
+                    {
+                      "name": "prediction",
+                      "expression": "`prediction`"
+                    },
+                    {
+                      "name": "prediction_upper",
+                      "expression": "`prediction_upper`"
+                    },
+                    {
+                      "name": "prediction_lower",
+                      "expression": "`prediction_lower`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Enrollment trend with forecast"
+              },
+              "version": 1,
+              "widgetType": "forecast-line",
+              "encodings": {
+                "x": {
+                  "fieldName": "ds",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "original": {
+                    "fieldName": "original"
+                  },
+                  "prediction": {
+                    "fieldName": "prediction"
+                  },
+                  "predictionUpper": {
+                    "fieldName": "prediction_upper"
+                  },
+                  "predictionLower": {
+                    "fieldName": "prediction_lower"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "grade",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "grade_letter",
+                      "expression": "`grade_letter`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Grade distribution"
+              },
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "grade_letter",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "score-distribution-by-department",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "min(score)",
+                      "expression": "MIN(`score`)"
+                    },
+                    {
+                      "name": "q1(score)",
+                      "expression": "PERCENTILE(`score`, 0.25)"
+                    },
+                    {
+                      "name": "median(score)",
+                      "expression": "MEDIAN(`score`)"
+                    },
+                    {
+                      "name": "q3(score)",
+                      "expression": "PERCENTILE(`score`, 0.75)"
+                    },
+                    {
+                      "name": "max(score)",
+                      "expression": "MAX(`score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Score distribution by department"
+              },
+              "version": 3,
+              "widgetType": "box",
+              "encodings": {
+                "x": {
+                  "fieldName": "department",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "whiskerStart": {
+                    "fieldName": "min(score)"
+                  },
+                  "boxStart": {
+                    "fieldName": "q1(score)"
+                  },
+                  "boxMid": {
+                    "fieldName": "median(score)"
+                  },
+                  "boxEnd": {
+                    "fieldName": "q3(score)"
+                  },
+                  "whiskerEnd": {
+                    "fieldName": "max(score)"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "course-metrics-enrollment-difficulty",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "65a632a6",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "credits",
+                      "expression": "`credits`"
+                    },
+                    {
+                      "name": "avg_score",
+                      "expression": "`avg_score`"
+                    },
+                    {
+                      "name": "total_enrollments",
+                      "expression": "`total_enrollments`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Course metrics by enrollment and difficulty"
+              },
+              "version": 3,
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "avg_score",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "total_enrollments",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "department",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "size": {
+                  "fieldName": "credits",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "score-frequency-distribution",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "bin(score, binWidth=5)",
+                      "expression": "BIN_FLOOR(`score`, 5)"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Score frequency distribution"
+              },
+              "version": 3,
+              "widgetType": "histogram",
+              "encodings": {
+                "x": {
+                  "fieldName": "bin(score, binWidth=5)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f4fcf30a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "4e67be8b",
+                  "fields": [
+                    {
+                      "name": "sum(student_count)",
+                      "expression": "SUM(`student_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(student_count)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "69f14c37",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "46a9e615",
+                  "fields": [
+                    {
+                      "name": "sum(total_students)",
+                      "expression": "SUM(`total_students`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_students)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 21,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c9508396",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "46a9e615",
+                  "fields": [
+                    {
+                      "name": "sum(total_courses)",
+                      "expression": "SUM(`total_courses`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_courses)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 32,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ffcb84f6",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "46a9e615",
+                  "fields": [
+                    {
+                      "name": "sum(overall_avg_score)",
+                      "expression": "SUM(`overall_avg_score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(overall_avg_score)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 27,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "1b762161",
+            "queries": [
+              {
+                "name": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132e85b10879bd20aaa0a857a31_score",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "min(score)",
+                      "expression": "MIN(`score`)"
+                    },
+                    {
+                      "name": "max(score)",
+                      "expression": "MAX(`score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "widgetType": "range-slider",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "score",
+                    "queryName": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132e85b10879bd20aaa0a857a31_score"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 2,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "d9d24938",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "6ecbd922",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "semester",
+                      "expression": "`semester`"
+                    },
+                    {
+                      "name": "sum(enrollment_count)",
+                      "expression": "SUM(`enrollment_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "semester",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(enrollment_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "department",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "fca560e8",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Student Grades Dashboard\n",
+                "\n",
+                "Student Grades dashboard analyzes grade performance across departments and courses.\n",
+                "\n",
+                "Click any bar or cell to cross-filter the page. Right-click to drill through to student-level detail."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "f36cba1a",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "26c286c6",
+            "queries": [
+              {
+                "name": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132e85b10879bd20aaa0a857a31_department",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "department_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132aaa21cf1ada9df31436772d3_department",
+                "query": {
+                  "datasetName": "4e67be8b",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "department_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a1330cc21e49b21b52294adb4124_department",
+                "query": {
+                  "datasetName": "da022da1",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "department_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132d9a21c949f878761d08af261_department",
+                "query": {
+                  "datasetName": "65a632a6",
+                  "fields": [
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "department_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "department",
+                    "queryName": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132e85b10879bd20aaa0a857a31_department"
+                  },
+                  {
+                    "fieldName": "department",
+                    "queryName": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132aaa21cf1ada9df31436772d3_department"
+                  },
+                  {
+                    "fieldName": "department",
+                    "queryName": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a1330cc21e49b21b52294adb4124_department"
+                  },
+                  {
+                    "fieldName": "department",
+                    "queryName": "dashboards/01f1a1328cf61dbf85402e5bc5ec50ca/datasets/01f1a132d9a21c949f878761d08af261_department"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "ad14740f",
+      "displayName": "Student detail",
+      "layout": [
+        {
+          "widget": {
+            "name": "student-grade-detail",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "student_name",
+                      "expression": "`student_name`"
+                    },
+                    {
+                      "name": "department",
+                      "expression": "`department`"
+                    },
+                    {
+                      "name": "course_name",
+                      "expression": "`course_name`"
+                    },
+                    {
+                      "name": "score",
+                      "expression": "`score`"
+                    },
+                    {
+                      "name": "credits",
+                      "expression": "`credits`"
+                    },
+                    {
+                      "name": "grade_letter",
+                      "expression": "`grade_letter`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Student grade detail"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "student_name"
+                  },
+                  {
+                    "fieldName": "department"
+                  },
+                  {
+                    "fieldName": "course_name"
+                  },
+                  {
+                    "fieldName": "score"
+                  },
+                  {
+                    "fieldName": "credits"
+                  },
+                  {
+                    "fieldName": "grade_letter"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "score-by-student",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "grade_letter",
+                      "expression": "`grade_letter`"
+                    },
+                    {
+                      "name": "student_name",
+                      "expression": "`student_name`"
+                    },
+                    {
+                      "name": "sum(score)",
+                      "expression": "SUM(`score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Score by student"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "student_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(score)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "grade_letter",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "student-course-score-matrix",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bc724b90",
+                  "fields": [
+                    {
+                      "name": "student_name",
+                      "expression": "`student_name`"
+                    },
+                    {
+                      "name": "course_name",
+                      "expression": "`course_name`"
+                    },
+                    {
+                      "name": "avg(score)",
+                      "expression": "AVG(`score`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "student_name"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "course_name"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`student_name`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`course_name`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Student-course score matrix"
+              },
+              "version": 4,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": {
+                  "fields": [
+                    {
+                      "fieldName": "student_name",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "columns": {
+                  "fields": [
+                    {
+                      "fieldName": "course_name",
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "cells": {
+                  "fields": [
+                    {
+                      "fieldName": "avg(score)",
+                      "cellType": "text"
+                    }
+                  ],
+                  "displayAs": "rows"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "e7240d55",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Student detail\n",
+                "\n",
+                "Student detail dashboard page shows individual student performance."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

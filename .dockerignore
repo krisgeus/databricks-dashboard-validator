@@ -1,0 +1,8 @@
+.git
+.github
+.idea
+examples
+tests
+README.md
+.pre-commit-config.yaml
+.pre-commit-hooks.yaml

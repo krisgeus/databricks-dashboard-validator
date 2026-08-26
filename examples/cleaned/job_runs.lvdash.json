@@ -1,0 +1,663 @@
+{
+  "datasets": [
+    {
+      "name": "c83731e4",
+      "displayName": "Job Runs",
+      "queryLines": [
+        "WITH most_recent_job_configuration AS (\r\n",
+        "    SELECT\r\n",
+        "        *,\r\n",
+        "        ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) AS rn\r\n",
+        "    FROM\r\n",
+        "        system.lakeflow.jobs\r\n",
+        ")\r\n",
+        "\r\n",
+        "SELECT\r\n",
+        "  FROM_UTC_TIMESTAMP(jrt.period_start_time, 'Europe/Amsterdam') AS start_time,\r\n",
+        "  FROM_UTC_TIMESTAMP(jrt.period_end_time, 'Europe/Amsterdam') AS end_time,\r\n",
+        "  DATE_FORMAT(FROM_UTC_TIMESTAMP(jrt.period_start_time, 'Europe/Amsterdam'), 'yyyy-MM-dd HH:mm:ss') AS start_time_formatted, -- to be used in table column start_time\r\n",
+        "  DATE_FORMAT(FROM_UTC_TIMESTAMP(jrt.period_end_time, 'Europe/Amsterdam'), 'yyyy-MM-dd HH:mm:ss') AS end_time_formatted, -- to be used in table column start_time\r\n",
+        "  COALESCE(job.name, jrt.run_name) AS `name`,\r\n",
+        "  CASE jrt.run_type\r\n",
+        "    WHEN 'JOB_RUN' THEN 'Manually'\r\n",
+        "    WHEN 'SUBMIT_RUN' THEN 'By runs submit API'\r\n",
+        "    ELSE jrt.run_type\r\n",
+        "  END AS launched_by,\r\n",
+        "  UNIX_TIMESTAMP(jrt.period_end_time) - UNIX_TIMESTAMP(jrt.period_start_time) AS duration_seconds,\r\n",
+        "  CASE\r\n",
+        "    WHEN duration_seconds >= 3600 THEN\r\n",
+        "      CONCAT(\r\n",
+        "        FLOOR(duration_seconds / 3600), 'h ',\r\n",
+        "        FLOOR((duration_seconds % 3600) / 60), 'm ',\r\n",
+        "        duration_seconds % 60, 's'\r\n",
+        "      )\r\n",
+        "    WHEN duration_seconds >= 60 THEN\r\n",
+        "      CONCAT(\r\n",
+        "        FLOOR(duration_seconds / 60), 'm ',\r\n",
+        "        duration_seconds % 60, 's'\r\n",
+        "      )\r\n",
+        "    ELSE\r\n",
+        "      CONCAT(duration_seconds, 's')\r\n",
+        "  END AS duration,\r\n",
+        "  CASE jrt.result_state\r\n",
+        "    WHEN 'SUCCEEDED' THEN 'Succeeded'\r\n",
+        "    WHEN 'ERROR' THEN 'Failed'\r\n",
+        "    -- Jobs & Pipelines UI shows American English spelling, while system table contains British English spelling.\r\n",
+        "    WHEN 'CANCELLED' THEN 'Canceled'\r\n",
+        "    ELSE jrt.result_state\r\n",
+        "  END AS status,\r\n",
+        "  CASE jrt.termination_code\r\n",
+        "    WHEN 'RUN_EXECUTION_ERROR' THEN 'RunExecutionError'\r\n",
+        "    -- Jobs & Pipelines UI shows American English spelling, while system table contains British English spelling.\r\n",
+        "    WHEN 'USER_CANCELLED' THEN 'UserCanceled'\r\n",
+        "    WHEN 'SUCCESS' THEN ''\r\n",
+        "  END AS error_code,\r\n",
+        "  jrt.workspace_id, -- to be used in url in table column start_time\r\n",
+        "  jrt.run_id, -- to be used in url in table column start_time\r\n",
+        "  job.job_id -- to be used in url in table column start_time\r\n",
+        "FROM\r\n",
+        "  system.lakeflow.job_run_timeline AS jrt\r\n",
+        "LEFT JOIN most_recent_job_configuration AS job\r\n",
+        "      ON jrt.workspace_id = job.workspace_id\r\n",
+        "      AND jrt.job_id = job.job_id\r\n",
+        "      AND job.rn = 1\r\n",
+        "WHERE\r\n",
+        "  jrt.run_type IN ('JOB_RUN', 'SUBMIT_RUN')\r\n",
+        "  AND jrt.result_state IS NOT NULL\r\n",
+        "  AND jrt.workspace_id = '1234567890123456'\r\n",
+        "  AND NOT (\r\n",
+        "    -- to match Jobs & Pipelines UI:\r\n",
+        "    -- Exclude jobs that have been deleted,\r\n",
+        "    --  while an active configuration exists with same workspace_id and name, and different job_id.\r\n",
+        "    job.delete_time IS NOT NULL\r\n",
+        "    AND EXISTS (\r\n",
+        "      SELECT 1\r\n",
+        "      FROM system.lakeflow.jobs AS active_job\r\n",
+        "      WHERE\r\n",
+        "        active_job.workspace_id = job.workspace_id\r\n",
+        "        AND active_job.name = job.name\r\n",
+        "        AND active_job.delete_time IS NULL\r\n",
+        "        AND active_job.job_id <> job.job_id\r\n",
+        "    )\r\n",
+        "  )\r\n",
+        "ORDER BY\r\n",
+        "  period_start_time DESC;\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "37c9e8f9",
+      "displayName": "Job runs",
+      "layout": [
+        {
+          "widget": {
+            "name": "t",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Total Runs"
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    },
+                    "hideGroupSeparator": false
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "fc275de9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "start_time_formatted",
+                      "expression": "`start_time_formatted`"
+                    },
+                    {
+                      "name": "end_time_formatted",
+                      "expression": "`end_time_formatted`"
+                    },
+                    {
+                      "name": "name",
+                      "expression": "`name`"
+                    },
+                    {
+                      "name": "launched_by",
+                      "expression": "`launched_by`"
+                    },
+                    {
+                      "name": "duration_seconds",
+                      "expression": "`duration_seconds`"
+                    },
+                    {
+                      "name": "duration",
+                      "expression": "`duration`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "error_code",
+                      "expression": "`error_code`"
+                    },
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "run_id",
+                      "expression": "`run_id`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`start_time_formatted`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "start_time_formatted",
+                    "actions": {
+                      "click": {
+                        "type": "link",
+                        "urlTemplate": "https://adb-{{ workspace_id }}.10.azuredatabricks.net/jobs/{{ job_id }}/runs/{{ run_id }}?o=1234567890123456",
+                        "openInNewTab": true
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "end_time_formatted"
+                  },
+                  {
+                    "fieldName": "name"
+                  },
+                  {
+                    "fieldName": "launched_by"
+                  },
+                  {
+                    "fieldName": "duration_seconds"
+                  },
+                  {
+                    "fieldName": "duration"
+                  },
+                  {
+                    "fieldName": "status"
+                  },
+                  {
+                    "fieldName": "error_code"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 0
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 11,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "runs_by_status",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "count(status)",
+                      "expression": "COUNT(`status`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Runs by Status",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "status",
+                  "displayName": "status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(status)",
+                  "displayName": "status",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Succeeded",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 3
+                        }
+                      },
+                      {
+                        "value": "Failed",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      },
+                      {
+                        "value": "Canceled",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 1
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 8,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "runs_per_day_stacked",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "daily(start_time)",
+                      "expression": "DATE_TRUNC(\"DAY\", `start_time`)"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Runs per Day by Status",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(start_time)",
+                  "displayName": "Day",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "displayName": "status",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "Status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Failed",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 11,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "start-time",
+            "queries": [
+              {
+                "name": "dashboards/01f19fbb5af81036a501824cce1a345f/datasets/01f19fbb5af817a38caff7dfd3912345_start_time",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "start_time",
+                      "expression": "`start_time`"
+                    },
+                    {
+                      "name": "start_time_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "selection": {
+                "defaultSelection": {
+                  "operator": {
+                    "operator": "AND",
+                    "args": []
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Start time"
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "start_time",
+                    "queryName": "dashboards/01f19fbb5af81036a501824cce1a345f/datasets/01f19fbb5af817a38caff7dfd3912345_start_time"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 5,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "job",
+            "queries": [
+              {
+                "name": "dashboards/01f19fbb5af81036a501824cce1a345f/datasets/01f19fbb5af817a38caff7dfd391873b_name",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "expression": "`name`"
+                    },
+                    {
+                      "name": "name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Job name"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "name",
+                    "queryName": "dashboards/01f19fbb5af81036a501824cce1a345f/datasets/01f19fbb5af817a38caff7dfd391873b_name"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "launched-by",
+            "queries": [
+              {
+                "name": "dashboards/01f1a06cfead1e5aa8764f98747ee453/datasets/01f1a06cfeae14298c32fad25f065de4_launched_by",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "launched_by",
+                      "expression": "`launched_by`"
+                    },
+                    {
+                      "name": "launched_by_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Launched by"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "launched_by",
+                    "queryName": "dashboards/01f1a06cfead1e5aa8764f98747ee453/datasets/01f1a06cfeae14298c32fad25f065de4_launched_by"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "result-state",
+            "queries": [
+              {
+                "name": "dashboards/01f19c984cf41177a03ecf144f3bcae4/datasets/01f19c98b6ca1e49b83542fcbf2ddef5_status",
+                "query": {
+                  "datasetName": "c83731e4",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "status_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Status"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "status",
+                    "queryName": "dashboards/01f19c984cf41177a03ecf144f3bcae4/datasets/01f19c98b6ca1e49b83542fcbf2ddef5_status"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "20f0a3e6",
+      "displayName": "Global Filters",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "f77df52e",
+      "displayName": "README",
+      "layout": [
+        {
+          "widget": {
+            "name": "51aecfdc",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Dit custom dashboard toont job runs inclusief runs verder dan 60 dagen terug. Dat is meer dan het standaard Databricks dashboard Jobs & Pipelines > Runs dat niet verder terug gaat dan 60 dagen.<br>Het duurt enige tijd tot een job run zichtbaar wordt in het dashboard, 3 tot 25 minuten geconstateerd. Dit komt doordat Databricks de gebruikte systeem tabellen in schema system.lakeview asynchroon in een achtergrondproces bijwerkt.<br>De tabel bevat in de kolom 'Start time' links naar het Databricks dashboard van een run, maar die links werken alleen als hoogstens 60 dagen terug."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

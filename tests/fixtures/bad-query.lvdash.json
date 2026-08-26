@@ -1,0 +1,8 @@
+{
+  "datasets": [
+    {
+      "name": "broken",
+      "queryLines": ["SELECT COUNT( FROM system.lakeflow.pipelines\n"]
+    }
+  ]
+}
