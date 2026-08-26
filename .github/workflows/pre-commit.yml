@@ -2,8 +2,20 @@ name: pre-commit CI
 
 on:  # yamllint disable-line rule:truthy
   pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
+  # Lets the checks be started by hand from the Actions tab, which is also the way to get
+  # them onto a pull request whose own events never fired.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a branch makes the run already going for it pointless.
+concurrency:
+  group: pre-commit-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pre-commit:
@@ -14,7 +26,16 @@ jobs:
       with:
         python-version: '3.13'
     # The dogfooding hook runs the validator directly instead of through docker, so the
-    # tools it shells out to have to be on the PATH.
+    # tools it shells out to have to be on the PATH. jq ships with the runner image.
     - name: Install sqlfluff
       run: pip install sqlfluff==4.3.0
     - uses: pre-commit/action@v3.0.1
+
+    # The docker workflow runs these against the image. Running them here as well means a
+    # pull request still gets them if the image build is skipped or unavailable, and they
+    # finish in seconds without docker.
+    - name: Run unit tests
+      # As in the docker job: a skipped test here would mean coverage was silently lost.
+      env:
+        DASHBOARD_SQL_REQUIRE_ALL: '1'
+      run: ./tests/run-tests.sh

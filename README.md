@@ -170,13 +170,54 @@ pre-commit, ask for it explicitly:
 
 ### Choosing the rule set
 
-sqlfluff resolves `.sqlfluff` relative to the file it is linting, and the extracted
-snippets live in a scratch directory, so the config has to be passed explicitly. The order
-is:
+sqlfluff resolves config relative to the file it is linting, and the extracted snippets
+live in a scratch directory outside your repository, so the config has to be passed
+explicitly. The order is:
 
 1. `--config FILE`, if given.
 2. `.sqlfluff` in the working directory — the root of your repository, under pre-commit.
-3. The bundled `sqlfluff-defaults.cfg`.
+3. `pyproject.toml` in the working directory, if it has a `[tool.sqlfluff...]` section.
+   A `pyproject.toml` that says nothing about sqlfluff is ignored, so an unrelated one does
+   not quietly displace the bundled defaults.
+4. The bundled `sqlfluff-defaults.cfg`.
+
+Whichever one wins is the only config in play: the validator passes
+`--ignore-local-config` so sqlfluff does not search its default locations on top of it.
+That keeps the config named in the output honest, and keeps a stray `~/.sqlfluff` from
+changing results between a laptop and CI.
+
+Passing the config explicitly matters for more than rule selection. Left to itself sqlfluff
+reads the working directory's config for core settings but resolves the nested sections
+against the snippet's own path — out in the scratch directory, where there is no config at
+all. A project that configures a templater keeps the templater and loses the settings that
+parameterise it:
+
+```toml
+[tool.sqlfluff.core]
+templater = "placeholder"
+
+[tool.sqlfluff.templater.placeholder]
+param_regex = '...'
+```
+
+which fails before linting anything, with
+`ValueError: No param_regex nor param_style was provided to the placeholder templater!`.
+Naming the file on the command line keeps the two halves together.
+
+Widget expressions are the exception. They are fragments rather than statements, so they
+are always checked with the bundled syntax-only config regardless of what your repository
+configures — including its templater.
+
+One thing to watch for when your repository's config takes over the dataset queries: a
+config written for dbt models or hand written SQL may switch off the very check this hook
+is for. `ignore = "parsing"` in particular downgrades `PRS` to nothing, so a query with an
+unbalanced bracket passes and the hook exits 0. If your repository config sets it, point
+the hook at a config of its own instead:
+
+```yaml
+  - id: validate-dashboard-sql
+    args: [--config, dashboards/.sqlfluff]
+```
 
 The bundled default is deliberately syntax first rather than style first. Dashboard SQL is
 edited through the Databricks UI as often as it is edited by hand, so a hook that fails a

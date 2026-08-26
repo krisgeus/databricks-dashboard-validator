@@ -95,6 +95,16 @@ run_validator_quiet() {
     rc=$?
 }
 
+# Run from inside ${1}, pinning nothing: these are the tests that cover how the validator
+# picks a config out of the repository it is checking, which is a question about the
+# working directory.
+run_validator_in() {
+    local dir="$1"
+    shift
+    out="$(cd "${dir}" && "${validate}" --verbose "$@" 2>&1)"
+    rc=$?
+}
+
 assert_status() {
     if [ "${rc}" -eq "$1" ]; then
         return 0
@@ -314,6 +324,94 @@ start "--sqlfluff-arg is repeatable"
 run_validator --sqlfluff-arg --rules --sqlfluff-arg layout \
     --config "${fixtures}/strict.sqlfluff" "${fixtures}/messy-layout.lvdash.json"
 assert_status 1 && assert_contains "LT02" && assert_not_contains "AM04" && pass
+
+# --- picking up the checked repository's own config ------------------------------------
+
+# The snippets are linted from a scratch directory outside the repository, so sqlfluff has
+# to be told about the repository's config explicitly. These cover the search order and,
+# in particular, a project that configures a templater: left to itself sqlfluff keeps the
+# templater from the working directory and loses the nested section that parameterises it,
+# then dies with "No param_regex nor param_style was provided to the placeholder
+# templater!" before linting anything.
+project="${work}/project"
+mkdir -p "${project}"
+cp "${fixtures}/messy-layout.lvdash.json" "${project}/dash.lvdash.json"
+
+start "a repository .sqlfluff is used as the config"
+cp "${fixtures}/strict.sqlfluff" "${project}/.sqlfluff"
+run_validator_in "${project}" dash.lvdash.json
+rm -f "${project}/.sqlfluff"
+assert_status 1 && assert_contains "LT02" && pass
+
+start "a pyproject.toml that configures sqlfluff is used as the config"
+cat > "${project}/pyproject.toml" << 'PYPROJECT'
+[project]
+name = "dashboards"
+version = "0.1.0"
+
+[tool.sqlfluff.core]
+dialect = "databricks"
+PYPROJECT
+run_validator_in "${project}" dash.lvdash.json
+assert_status 1 \
+    && assert_contains "query snippet(s) with ${project}/pyproject.toml" \
+    && assert_contains "LT02" \
+    && pass
+
+start "a pyproject.toml that says nothing about sqlfluff is left alone"
+cat > "${project}/pyproject.toml" << 'PYPROJECT'
+[project]
+name = "dashboards"
+version = "0.1.0"
+
+[tool.ruff]
+line-length = 100
+PYPROJECT
+run_validator_in "${project}" dash.lvdash.json
+assert_status 0 \
+    && assert_contains "query snippet(s) with ${bin_dir}/sqlfluff-defaults.cfg" \
+    && assert_not_contains "LT02" \
+    && pass
+
+# Regression test for the placeholder templater crash.
+start "a project that configures a templater does not break the run"
+cat > "${project}/pyproject.toml" << 'PYPROJECT'
+[project]
+name = "dashboards"
+version = "0.1.0"
+
+[tool.sqlfluff.core]
+dialect = "databricks"
+templater = "placeholder"
+
+[tool.sqlfluff.templater.placeholder]
+param_regex = 'IDENTIFIER\s*\([^)]*\)|\$\{[^}]*\}|\{\{[^}]*\}\}'
+param_placeholder = "sandbox"
+PYPROJECT
+run_validator_in "${project}" dash.lvdash.json
+assert_status 1 \
+    && assert_not_contains "param_regex nor param_style" \
+    && assert_not_contains "Traceback" \
+    && assert_contains "LT02" \
+    && pass
+
+# The expressions are always checked with the bundled syntax only config, so the project's
+# templater must not reach them either. messy-layout has no expressions in it, so this one
+# needs a dashboard that does.
+start "a project templater does not reach the expression run"
+cp "${fixtures}/clean.lvdash.json" "${project}/with-expressions.lvdash.json"
+run_validator_in "${project}" --query-mode off with-expressions.lvdash.json
+assert_status 0 \
+    && assert_contains "expression snippet(s) with ${bin_dir}/sqlfluff-expressions.cfg" \
+    && assert_not_contains "param_regex nor param_style" \
+    && pass
+
+start "--config still wins over the repository's own config"
+run_validator_in "${project}" --config "${bin_dir}/sqlfluff-defaults.cfg" dash.lvdash.json
+rm -f "${project}/pyproject.toml"
+assert_status 0 \
+    && assert_contains "query snippet(s) with ${bin_dir}/sqlfluff-defaults.cfg" \
+    && pass
 
 start "--keep-tmp leaves the extracted snippets behind"
 run_validator --keep-tmp "${fixtures}/clean.lvdash.json"
