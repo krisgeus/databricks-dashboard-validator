@@ -105,14 +105,36 @@ command -v sqlfluff > /dev/null 2>&1 || die "sqlfluff is not installed"
 extractor="${bin_dir}/extract-sql-snippets.jq"
 [ -r "${extractor}" ] || die "extractor not found at ${extractor}"
 
-# sqlfluff resolves .sqlfluff relative to the file it is linting, and the snippets live in
-# a scratch directory, so the config has to be passed explicitly. A .sqlfluff in the
-# repository being checked wins over the bundled default; --config wins over both.
+# sqlfluff resolves config relative to the file it is linting, and the snippets live in a
+# scratch directory outside the repository, so the config has to be passed explicitly.
+#
+# Passing it is not only about picking the right rules. Left to itself sqlfluff still reads
+# the working directory's config for core settings but resolves the nested sections against
+# the snippet's own path, where there is no config at all. A project that sets
+#
+#     [tool.sqlfluff.core]
+#     templater = "placeholder"
+#     [tool.sqlfluff.templater.placeholder]
+#     param_regex = '...'
+#
+# then keeps the templater and loses the parameters, and sqlfluff dies with "No param_regex
+# nor param_style was provided to the placeholder templater!". Naming the file on the
+# command line keeps the two halves together.
+#
+# Order: --config, then the repository's own config, then the bundled default. sqlfluff
+# reads its settings from either a .sqlfluff or a [tool.sqlfluff.*] section in
+# pyproject.toml, so both count as "the repository's own".
 resolve_config() {
     if [ -n "${config}" ]; then
         printf '%s\n' "${config}"
     elif [ -f "${PWD}/.sqlfluff" ]; then
         printf '%s\n' "${PWD}/.sqlfluff"
+    elif [ -f "${PWD}/pyproject.toml" ] \
+        && grep -q '^[[:space:]]*\[tool\.sqlfluff' "${PWD}/pyproject.toml"; then
+        # Only when it actually configures sqlfluff: nearly every python project has a
+        # pyproject.toml, and treating an unrelated one as the config would quietly drop
+        # the bundled defaults.
+        printf '%s\n' "${PWD}/pyproject.toml"
     else
         printf '%s\n' "$1"
     fi
@@ -183,9 +205,16 @@ check_kind() {
     printf 'Linting %s %s snippet(s) with %s\n' \
         "$(find "${dir}" -name '*.sql' | wc -l | tr -d ' ')" "${kind}" "${config}"
 
+    # --ignore-local-config stops sqlfluff searching its default locations on top of the
+    # config named here, so the file reported above is genuinely the only one in play. It
+    # does not suppress --config. Without it the working directory's config is merged in
+    # half way: the snippets sit outside the repository, so core settings are picked up but
+    # the nested sections they depend on are not, which is what breaks a project that
+    # configures a templater. It also keeps a stray ~/.sqlfluff from changing CI results.
     sqlfluff lint \
         --dialect "${dialect}" \
         --config "${config}" \
+        --ignore-local-config \
         ${sqlfluff_args[@]+"${sqlfluff_args[@]}"} \
         "${dir}" 2>&1 | relabel "${work}/map.tsv"
 
