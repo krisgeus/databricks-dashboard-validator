@@ -71,7 +71,7 @@ Builds the image from this repository.
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.0.0
+  rev: v1.1.0
   hooks:
   - id: validate-dashboard-sql
 ```
@@ -82,18 +82,18 @@ Same, using the pre-built image tagged `latest`.
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.0.0
+  rev: v1.1.0
   hooks:
   - id: validate-dashboard-sql-docker-latest
 ```
 
 ### validate-dashboard-sql-docker-release
 
-Same, using the pre-built image from the release (tag `v1.0.0`).
+Same, using the pre-built image from the release (tag `v1.1.0`).
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.0.0
+  rev: v1.1.0
   hooks:
   - id: validate-dashboard-sql-docker-release
 ```
@@ -137,7 +137,7 @@ Pass options through `args:`.
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.0.0
+  rev: v1.1.0
   hooks:
   - id: validate-dashboard-sql-docker-release
     args: [--dialect, sparksql, --expression-mode, 'off']
@@ -260,7 +260,7 @@ repos:
 
 # And the SQL inside it.
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.0.0
+  rev: v1.1.0
   hooks:
   - id: validate-dashboard-sql-docker-release
 ```
