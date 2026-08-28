@@ -1,3 +1,5 @@
 ignored:
-  # Pinning the debian package version of jq breaks the build on every security update.
+  # The image installs no debian packages any more; the rule is kept ignored so that
+  # adding one back for a build dependency does not fail the lint on a pinned version
+  # that debian rotates on every security update.
   - DL3008

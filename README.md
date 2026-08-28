@@ -18,9 +18,9 @@ jq -r '.datasets[].queryLines | join("")' pipeline_runs.lvdash.json \
 ## What gets extracted
 
 The dashboard json carries SQL in more than one place, so rather than hard coding the
-paths that today's schema happens to use, `extract-sql-snippets.jq` walks the whole
-document and picks up anything that looks like SQL. A schema version that moves a query
-somewhere else keeps working.
+paths that today's schema happens to use, the extractor walks the whole document and picks
+up anything that looks like SQL. A schema version that moves a query somewhere else keeps
+working.
 
 | Shape in the json | Kind | What it is |
 | --- | --- | --- |
@@ -65,13 +65,33 @@ point if you are about to clean up your own.
 
 ## Usage
 
+There are four hook ids: one that needs nothing but python, and three that need docker.
+They do the same work and print the same thing — pick whichever fits the machines your
+repository is committed from.
+
+### validate-dashboard-sql-python
+
+No docker required. pre-commit builds a virtualenv for the hook and installs sqlfluff into
+it, so there is nothing to have on the `PATH` beforehand.
+
+```yaml
+- repo: https://github.com/krisgeus/databricks-dashboard-validator
+  rev: v1.2.0
+  hooks:
+  - id: validate-dashboard-sql-python
+```
+
+This is the one to reach for on a machine without docker, in a CI job that would rather not
+start a container, and anywhere a locked-down laptop makes a container a nuisance. The
+sqlfluff version is pinned by the hook, so it produces the same verdict everywhere.
+
 ### validate-dashboard-sql
 
 Builds the image from this repository.
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.1.0
+  rev: v1.2.0
   hooks:
   - id: validate-dashboard-sql
 ```
@@ -82,39 +102,48 @@ Same, using the pre-built image tagged `latest`.
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.1.0
+  rev: v1.2.0
   hooks:
   - id: validate-dashboard-sql-docker-latest
 ```
 
 ### validate-dashboard-sql-docker-release
 
-Same, using the pre-built image from the release (tag `v1.1.0`).
+Same, using the pre-built image from the release (tag `v1.2.0`).
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.1.0
+  rev: v1.2.0
   hooks:
   - id: validate-dashboard-sql-docker-release
 ```
 
-All three hooks are restricted to files matching `\.lvdash\.json$`. If your dashboards are
+All four hooks are restricted to files matching `\.lvdash\.json$`. If your dashboards are
 exported under a different name, override `files:` in your own config.
 
 ### Outside pre-commit
 
-Against the pre-built image:
+The validator is an ordinary python package, so `uvx` runs it without installing anything
+permanently:
+
+```shell
+uvx --from git+https://github.com/krisgeus/databricks-dashboard-validator@v1.2.0 \
+  validate-dashboard-sql dashboards/*.lvdash.json
+```
+
+Installed into an environment of its own:
+
+```shell
+pip install git+https://github.com/krisgeus/databricks-dashboard-validator@v1.2.0
+validate-dashboard-sql dashboards/*.lvdash.json
+```
+
+Or against the pre-built image:
 
 ```shell
 docker run --rm --volume "${PWD}:/src:ro" --workdir /src \
   ghcr.io/krisgeus/databricks-dashboard-sql-check:latest \
   dashboards/pipeline_runs.lvdash.json
-```
-
-Or straight from a checkout, with `jq` and `sqlfluff` on the `PATH`:
-
-```shell
-./validate-dashboard-sql.sh dashboards/*.lvdash.json
 ```
 
 ## Configuration
@@ -132,14 +161,14 @@ Or straight from a checkout, with `jq` and `sqlfluff` on the `PATH`:
 
 There are no environment variable equivalents. pre-commit does not forward the environment
 into a `language: docker` hook, so a variable would configure a local run and silently not
-a containerised one — the command line is the one channel that behaves the same either way.
-Pass options through `args:`.
+a containerised one — the command line is the one channel that behaves the same for every
+hook id here. Pass options through `args:`.
 
 ```yaml
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.1.0
+  rev: v1.2.0
   hooks:
-  - id: validate-dashboard-sql-docker-release
+  - id: validate-dashboard-sql-python
     args: [--dialect, sparksql, --expression-mode, 'off']
 ```
 
@@ -260,30 +289,53 @@ repos:
 
 # And the SQL inside it.
 - repo: https://github.com/krisgeus/databricks-dashboard-validator
-  rev: v1.1.0
+  rev: v1.2.0
   hooks:
-  - id: validate-dashboard-sql-docker-release
+  - id: validate-dashboard-sql-python
+```
+
+## Development
+
+The project is managed with [uv](https://docs.astral.sh/uv/). One sync gets the validator,
+its pinned sqlfluff, and the tooling:
+
+```shell
+uv sync --group dev
+uv run validate-dashboard-sql dashboards/*.lvdash.json
+```
+
+[ruff](https://docs.astral.sh/ruff/) lints and formats, [ty](https://docs.astral.sh/ty/)
+type checks, and both run as pre-commit hooks. `ty` and the dogfooding hook run out of this
+environment, so `uv sync` has to have happened before `pre-commit run`.
+
+```shell
+uv run ruff check --fix .
+uv run ruff format .
+uv run ty check
 ```
 
 ## Tests
 
-`tests/run-tests.sh` covers extraction of each SQL shape, the exit statuses, the mapping of
-violations back to json paths, the configuration switches, and a regression test for a
-query too large to pass as a command line argument.
+`tests/test_extract.py` covers the extractor on its own — which shapes count as SQL, how an
+array element is named, the order snippets come out in. `tests/test_cli.py` drives the
+built command as a subprocess and covers the exit statuses, the mapping of violations back
+to json paths, the configuration switches, and a regression test for a query too large to
+pass as a command line argument.
 
-Against the image, as the build pipeline runs them:
-
-```shell
-docker build -t databricks-dashboard-sql-check:test .
-docker run --rm \
-  --volume "${PWD}/tests:/tests:ro" \
-  --volume "${PWD}/examples:/examples:ro" \
-  --env DASHBOARD_SQL_REQUIRE_ALL=1 \
-  --entrypoint /tests/run-tests.sh databricks-dashboard-sql-check:test
-```
-
-Against the checkout, which needs `jq` and `sqlfluff` on the `PATH`:
+Against the checkout:
 
 ```shell
-./tests/run-tests.sh
+uv run pytest
 ```
+
+Against the image, as the build pipeline runs them. The `test` stage is the published image
+plus pytest and the tests, so the suite exercises the install that ships:
+
+```shell
+docker build --target test -t databricks-dashboard-sql-check:test .
+docker run --rm --env DASHBOARD_SQL_REQUIRE_ALL=1 databricks-dashboard-sql-check:test
+```
+
+`DASHBOARD_SQL_REQUIRE_ALL=1` turns "the example dashboards are not available" from a skip
+into a failure, which is what the build pipeline wants: a skip there would mean coverage
+was silently lost.

@@ -36,18 +36,40 @@ repos:
   hooks:
   - id: shellcheck
 
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.16.5
+  hooks:
+  - id: ruff-check
+    args: [--fix]
+  - id: ruff-format
+
+# ty has no published hook repository yet, so it runs out of the project's own environment.
+# uv sync has to have been run once; CI does it explicitly.
+- repo: local
+  hooks:
+  - id: ty
+    name: Type check with ty
+    entry: uv run --frozen ty check
+    language: system
+    types: [python]
+    pass_filenames: false
+
 # Dogfooding: check the example dashboards with the hook this repository ships.
 #
 # Only examples/cleaned/ is checked. examples/raw/ holds the dashboards exactly as the
 # Databricks UI exported them, violations and all, so that examples/README.md has
 # something to document the cleanup against; running the hook over them would fail every
 # commit by design. tests/fixtures/ is likewise broken on purpose.
+#
+# This runs the validator out of the project's own environment rather than through one of
+# the shipped hook ids, because a `repo: local` hook cannot install the repository it
+# lives in.
 - repo: local
   hooks:
   - id: validate-dashboard-sql
     name: Validate SQL in Databricks dashboards
-    language: script
-    entry: validate-dashboard-sql.sh
+    entry: uv run --frozen validate-dashboard-sql
+    language: system
     types: [json]
     files: ^examples/cleaned/.*\.lvdash\.json$
 #    args:

@@ -1,8 +1,12 @@
 .git
 .github
 .idea
-examples
-tests
-README.md
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+uv.lock
 .pre-commit-config.yaml
 .pre-commit-hooks.yaml
+# README.md, src/, tests/ and examples/ are all needed by the build: the package install
+# reads the readme, and the test stage runs the suite against the examples.

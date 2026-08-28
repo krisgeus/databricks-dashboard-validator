@@ -1,0 +1,55 @@
+[project]
+name = "databricks-dashboard-validator"
+version = "1.2.0"
+description = "Extract the inline SQL from Databricks Lakeview dashboards and lint it with sqlfluff."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Kris Geusebroek" }]
+keywords = ["databricks", "lakeview", "dashboard", "sqlfluff", "pre-commit"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+# sqlfluff is pinned rather than ranged: it is the thing whose output this hook reports,
+# so a floating version would change what a commit is judged against without anything in
+# this repository moving. The docker image pins the same version through this file.
+dependencies = ["sqlfluff==4.3.0"]
+
+[project.urls]
+Homepage = "https://github.com/krisgeus/databricks-dashboard-validator"
+Issues = "https://github.com/krisgeus/databricks-dashboard-validator/issues"
+
+[project.scripts]
+validate-dashboard-sql = "databricks_dashboard_validator.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/databricks_dashboard_validator"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.14", "ty>=0.0.1a1"]
+
+[tool.ruff]
+line-length = 96
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Show the reason for every skip: a skipped test here means coverage was silently lost.
+addopts = "-ra"

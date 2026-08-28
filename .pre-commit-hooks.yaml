@@ -1,3 +1,13 @@
+# The python hook needs nothing but python: pre-commit builds it a virtualenv and installs
+# sqlfluff into it. The docker hooks below are unchanged, for the repositories that would
+# rather pull an image than build an environment.
+- id: validate-dashboard-sql-python
+  name: Validate SQL in Databricks dashboards
+  description: Extracts the inline SQL from Lakeview dashboards and lints it with sqlfluff.
+  entry: validate-dashboard-sql
+  language: python
+  types: [json]
+  files: \.lvdash\.json$
 - id: validate-dashboard-sql
   name: Validate SQL in Databricks dashboards
   description: Extracts the inline SQL from Lakeview dashboards and lints it with sqlfluff.
@@ -16,6 +26,6 @@
   name: Validate SQL in Databricks dashboards with released docker
   description: Extracts the inline SQL from Lakeview dashboards and lints it with sqlfluff.
   language: docker_image
-  entry: --entrypoint /bin/validate-dashboard-sql ghcr.io/krisgeus/databricks-dashboard-sql-check:v1.1.0
+  entry: --entrypoint /bin/validate-dashboard-sql ghcr.io/krisgeus/databricks-dashboard-sql-check:v1.2.0
   types: [json]
   files: \.lvdash\.json$
